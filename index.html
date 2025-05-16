@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tetris Web Game with Leaderboard</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap');
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    margin: 0;
+    background: linear-gradient(135deg, #141e30 0%, #243b55 100%);
+    color: #eee;
+    font-family: 'Montserrat', sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: start;
+    min-height: 100vh;
+    padding: 20px;
+  }
+  #app {
+    max-width: 600px;
+    width: 100%;
+    background: #1f2a44;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 0 15px #0a192f;
+  }
+  h1 {
+    font-weight: 700;
+    margin-bottom: 10px;
+    text-align: center;
+    color: #00d8ff;
+    letter-spacing: 2px;
+  }
+  button {
+    cursor: pointer;
+    background: #00d8ff;
+    border: none;
+    color: #1f2a44;
+    font-weight: 700;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 16px;
+    transition: background 0.3s ease;
+    margin: 10px auto;
+    display: block;
+    user-select: none;
+  }
+  button:hover {
+    background: #0099cc;
+  }
+  #leaderboard-view, #game-view {
+    display: none;
+  }
+  #leaderboard-view.active, #game-view.active {
+    display: block;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 15px;
+  }
+  th, td {
+    padding: 8px 12px;
+    text-align: center;
+    color: #c4eefd;
+  }
+  th {
+    border-bottom: 2px solid #00d8ff;
+  }
+  tr:nth-child(odd) {
+    background: #243b55;
+  }
+  #game-canvas {
+    background: #0a192f;
+    display: block;
+    margin: 0 auto;
+    border-radius: 8px;
+    box-shadow: 0 0 15px #00d8ff;
+  }
+  #score-container {
+    color: #00d8ff;
+    font-weight: 700;
+    text-align: center;
+    margin: 10px 0;
+    font-size: 18px;
+  }
+  #game-over-screen {
+    display: none;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: #1f2a44;
+    padding: 25px;
+    border-radius: 12px;
+    box-shadow: 0 0 20px #00d8ff;
+    text-align: center;
+    color: #00d8ff;
+    z-index: 10;
+  }
+  #game-over-screen.active {
+    display: block;
+  }
+  #game-over-screen input[type=text] {
+    padding: 8px;
+    border-radius: 6px;
+    border: none;
+    width: 80%;
+    font-size: 16px;
+    margin-top: 10px;
+    margin-bottom: 10px;
+    text-align: center;
+  }
+  #game-over-screen button {
+    width: 50%;
+    font-weight: 700;
+  }
+  #info {
+    font-size: 13px;
+    color: #7fbfff;
+    text-align: center;
+    margin-top: 8px;
+    user-select: none;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <section id="leaderboard-view" class="active">
+    <h1>Leaderboard</h1>
+    <table>
+      <thead>
+        <tr><th>Rank</th><th>Name</th><th>Score</th></tr>
+      </thead>
+      <tbody id="leaderboard-body">
+        <!-- Leaderboard entries inserted here -->
+      </tbody>
+    </table>
+    <button id="start-game-btn">Start Game</button>
+    <div id="info">Scores saved locally in your browser</div>
+  </section>
+
+  <section id="game-view" tabindex="0">
+    <h1>TETRIS</h1>
+    <canvas id="game-canvas" width="300" height="600" ></canvas>
+    <div id="score-container">Score: 0</div>
+    <button id="end-game-btn">End Game</button>
+  </section>
+
+  <div id="game-over-screen">
+    <h2>Game Over</h2>
+    <p>Your Score: <span id="final-score">0</span></p>
+    <input type="text" id="user-name" maxlength="12" placeholder="Enter your name" />
+    <button id="submit-score-btn">Submit Score</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  const leaderBoardKey = 'tetris_leaderboard_v1';
+
+  // Entry point elements
+  const leaderboardView = document.getElementById('leaderboard-view');
+  const gameView = document.getElementById('game-view');
+  const leaderboardBody = document.getElementById('leaderboard-body');
+  const startGameBtn = document.getElementById('start-game-btn');
+  const endGameBtn = document.getElementById('end-game-btn');
+  const scoreContainer = document.getElementById('score-container');
+  const gameOverScreen = document.getElementById('game-over-screen');
+  const finalScoreSpan = document.getElementById('final-score');
+  const userNameInput = document.getElementById('user-name');
+  const submitScoreBtn = document.getElementById('submit-score-btn');
+
+  // Canvas and game constants
+  const canvas = document.getElementById('game-canvas');
+  const ctx = canvas.getContext('2d');
+
+  const COLS = 10;
+  const ROWS = 20;
+  const CELL_SIZE = 30;
+
+  // Colors for each tetromino type
+  const COLORS = [
+    null,
+    '#00ffff', // I - cyan
+    '#0000ff', // J - blue
+    '#ff7f00', // L - orange
+    '#ffff00', // O - yellow
+    '#00ff00', // S - green
+    '#800080', // T - purple
+    '#ff0000', // Z - red
+  ];
+
+  // Tetromino shapes - each has rotations represented by 2D arrays
+  const TETROMINOS = {
+    1: [ // I
+      [
+        [0,0,0,0],
+        [1,1,1,1],
+        [0,0,0,0],
+        [0,0,0,0]
+      ],
+      [
+        [0,0,1,0],
+        [0,0,1,0],
+        [0,0,1,0],
+        [0,0,1,0]
+      ],
+    ],
+    2: [ // J
+      [
+        [2,0,0],
+        [2,2,2],
+        [0,0,0]
+      ],
+      [
+        [0,2,2],
+        [0,2,0],
+        [0,2,0]
+      ],
+      [
+        [0,0,0],
+        [2,2,2],
+        [0,0,2]
+      ],
+      [
+        [0,2,0],
+        [0,2,0],
+        [2,2,0]
+      ]
+    ],
+    3: [ // L
+      [
+        [0,0,3],
+        [3,3,3],
+        [0,0,0]
+      ],
+      [
+        [0,3,0],
+        [0,3,0],
+        [0,3,3]
+      ],
+      [
+        [0,0,0],
+        [3,3,3],
+        [3,0,0]
+      ],
+      [
+        [3,3,0],
+        [0,3,0],
+        [0,3,0]
+      ]
+    ],
+    4: [ // O
+      [
+        [4,4],
+        [4,4]
+      ]
+    ],
+    5: [ // S
+      [
+        [0,5,5],
+        [5,5,0],
+        [0,0,0]
+      ],
+      [
+        [0,5,0],
+        [0,5,5],
+        [0,0,5]
+      ]
+    ],
+    6: [ // T
+      [
+        [0,6,0],
+        [6,6,6],
+        [0,0,0]
+      ],
+      [
+        [0,6,0],
+        [0,6,6],
+        [0,6,0]
+      ],
+      [
+        [0,0,0],
+        [6,6,6],
+        [0,6,0]
+      ],
+      [
+        [0,6,0],
+        [6,6,0],
+        [0,6,0]
+      ]
+    ],
+    7: [ // Z
+      [
+        [7,7,0],
+        [0,7,7],
+        [0,0,0]
+      ],
+      [
+        [0,0,7],
+        [0,7,7],
+        [0,7,0]
+      ]
+    ]
+  };
+
+  // Game variables
+  let board = [];
+  let currentPiece = null;
+  let gameInterval = null;
+  let score = 0;
+  let linesCleared = 0;
+  let dropSpeed = 800; // initial drop interval in ms
+  let gameActive = false;
+
+  // Player input cooldown to prevent spamming
+  let lastMoveTime = 0;
+
+  // Helper: builds an empty board
+  function createBoard() {
+    let b = [];
+    for(let r = 0; r < ROWS; r++) {
+      b[r] = new Array(COLS).fill(0);
+    }
+    return b;
+  }
+
+  // Pick a random tetromino piece
+  function randomPiece() {
+    const shapeId = Math.floor(Math.random() * 7) + 1;
+    return {
+      shapeId: shapeId,
+      rotationIndex: 0,
+      shape: TETROMINOS[shapeId][0],
+      x: Math.floor(COLS / 2) - 1,
+      y: 0,
+    };
+  }
+
+  // Rotate shape matrix clockwise
+  function rotateMatrix(matrix) {
+    const N = matrix.length;
+    let rotated = [];
+    for(let i = 0; i < N; i++) {
+      rotated[i] = [];
+      for(let j = 0; j < N; j++) {
+        rotated[i][j] = matrix[N - j - 1][i];
+      }
+    }
+    return rotated;
+  }
+
+  function getNextRotation(piece) {
+    const rotations = TETROMINOS[piece.shapeId];
+    let nextIndex = (piece.rotationIndex + 1) % rotations.length;
+    return {
+      rotationIndex: nextIndex,
+      shape: rotations[nextIndex]
+    };
+  }
+
+  // Check collision of piece with board boundaries or existing locked pieces
+  function collision(piece, board, offsetX = 0, offsetY = 0, shapeOverride = null) {
+    const shape = shapeOverride || piece.shape;
+    for(let r = 0; r < shape.length; r++) {
+      for(let c = 0; c < shape[r].length; c++) {
+        if(shape[r][c]) {
+          let x = piece.x + c + offsetX;
+          let y = piece.y + r + offsetY;
+          if(x < 0 || x >= COLS || y >= ROWS) {
+            return true;
+          }
+          if(y >= 0 && board[y][x]) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  // Lock piece into the board after it lands
+  function lockPiece() {
+    currentPiece.shape.forEach((row, r) => {
+      row.forEach((value, c) => {
+        if(value && currentPiece.y + r >= 0) {
+          board[currentPiece.y + r][currentPiece.x + c] = value;
+        }
+      });
+    });
+  }
+
+  // Clear lines and update score accordingly
+  function clearLines() {
+    let lines = 0;
+    outer: for(let r = ROWS - 1; r >= 0; r--) {
+      for(let c = 0; c < COLS; c++) {
+        if(board[r][c] === 0) {
+          continue outer;
+        }
+      }
+      // found full line
+      board.splice(r, 1);
+      board.unshift(new Array(COLS).fill(0));
+      lines++;
+      r++; // re-check this row after shift
+    }
+    if(lines > 0) {
+      linesCleared += lines;
+      switch(lines) {
+        case 1:
+          score += 40;
+          break;
+        case 2:
+          score += 100;
+          break;
+        case 3:
+          score += 300;
+          break;
+        case 4:
+          score += 1200;
+          break;
+      }
+      // Speed up the game as player scores more, min speed capped
+      dropSpeed = Math.max(100, 800 - Math.floor(score / 50) * 30);
+    }
+  }
+
+  // Draw a single cell
+  function drawCell(x, y, colorId) {
+    ctx.fillStyle = colorId ? COLORS[colorId] : '#0a192f';
+    ctx.strokeStyle = '#0d244d';
+    ctx.lineWidth = 1;
+    ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+    ctx.strokeRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+  }
+
+  // Draw the entire board and current piece
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Draw board
+    for(let r = 0; r < ROWS; r++) {
+      for(let c = 0; c < COLS; c++) {
+        drawCell(c, r, board[r][c]);
+      }
+    }
+    // Draw current piece
+    if(currentPiece) {
+      currentPiece.shape.forEach((row, r) => {
+        row.forEach((value, c) => {
+          if(value) {
+            let x = currentPiece.x + c;
+            let y = currentPiece.y + r;
+            if (y >= 0) {
+              drawCell(x, y, value);
+            }
+          }
+        });
+      });
+    }
+  }
+
+  // Move piece down by 1, return true if moved, false if landed
+  function moveDown() {
+    if(!collision(currentPiece, board, 0, 1)) {
+      currentPiece.y += 1;
+      return true;
+    } else {
+      lockPiece();
+      clearLines();
+      updateScore();
+      currentPiece = randomPiece();
+      // If collision immediately, game over
+      if(collision(currentPiece, board)) {
+        gameOver();
+      }
+      return false;
+    }
+  }
+
+  // Draw current score
+  function updateScore() {
+    scoreContainer.textContent = `Score: ${score}`;
+  }
+
+  // Clear and reset game states
+  function resetGame() {
+    board = createBoard();
+    currentPiece = randomPiece();
+    score = 0;
+    linesCleared = 0;
+    dropSpeed = 800;
+    updateScore();
+    draw();
+  }
+
+  // Game loop
+  function gameLoop() {
+    const now = Date.now();
+    if(!lastMoveTime || now - lastMoveTime >= dropSpeed) {
+      moveDown();
+      draw();
+      lastMoveTime = now;
+    }
+  }
+
+  // Input handlers
+  function onKeyDown(e) {
+    if(!gameActive) return;
+    switch(e.key) {
+      case 'ArrowLeft':
+        if(!collision(currentPiece, board, -1, 0)) {
+          currentPiece.x -= 1;
+          draw();
+        }
+        break;
+      case 'ArrowRight':
+        if(!collision(currentPiece, board, 1, 0)) {
+          currentPiece.x += 1;
+          draw();
+        }
+        break;
+      case 'ArrowDown':
+        if(moveDown()) {
+          draw();
+        }
+        break;
+      case 'ArrowUp':
+      case 'x':
+      case 'X': // rotate clockwise
+        let { rotationIndex, shape } = getNextRotation(currentPiece);
+        if(!collision(currentPiece, board, 0, 0, shape)) {
+          currentPiece.rotationIndex = rotationIndex;
+          currentPiece.shape = shape;
+          draw();
+        }
+        break;
+      case 'z':
+      case 'Z': // rotate counterclockwise (3 clockwise rotations)
+        let rotations = TETROMINOS[currentPiece.shapeId];
+        let ccwIndex = (currentPiece.rotationIndex + rotations.length - 1) % rotations.length;
+        let ccwShape = rotations[ccwIndex];
+        if(!collision(currentPiece, board, 0, 0, ccwShape)) {
+          currentPiece.rotationIndex = ccwIndex;
+          currentPiece.shape = ccwShape;
+          draw();
+        }
+        break;
+      case ' ': // space - hard drop
+        while(moveDown()){}
+        draw();
+        break;
+    }
+  }
+
+  // Game over actions
+  function gameOver() {
+    gameActive = false;
+    clearInterval(gameInterval);
+    finalScoreSpan.textContent = score;
+    gameOverScreen.classList.add('active');
+    userNameInput.value = '';
+    userNameInput.focus();
+  }
+
+  // Save score to localStorage leaderboard
+  function saveScore(name, score) {
+    let leaderboard = JSON.parse(localStorage.getItem(leaderBoardKey)) || [];
+    let entry = { name, score };
+    leaderboard.push(entry);
+    leaderboard.sort((a,b) => b.score - a.score);
+    if(leaderboard.length > 10) {
+      leaderboard = leaderboard.slice(0, 10);
+    }
+    localStorage.setItem(leaderBoardKey, JSON.stringify(leaderboard));
+  }
+
+  // Render leaderboard table
+  function renderLeaderboard() {
+    let leaderboard = JSON.parse(localStorage.getItem(leaderBoardKey)) || [];
+    leaderboardBody.innerHTML = '';
+    if(leaderboard.length === 0) {
+      let tr = document.createElement('tr');
+      let td = document.createElement('td');
+      td.setAttribute('colspan', '3');
+      td.textContent = 'No scores yet. Be the first!';
+      td.style.color = '#888';
+      tr.appendChild(td);
+      leaderboardBody.appendChild(tr);
+      return;
+    }
+    leaderboard.forEach(({name, score}, index) => {
+      let tr = document.createElement('tr');
+      let rankTd = document.createElement('td');
+      rankTd.textContent = index + 1;
+      let nameTd = document.createElement('td');
+      nameTd.textContent = name;
+      let scoreTd = document.createElement('td');
+      scoreTd.textContent = score;
+      tr.appendChild(rankTd);
+      tr.appendChild(nameTd);
+      tr.appendChild(scoreTd);
+      leaderboardBody.appendChild(tr);
+    });
+  }
+
+  // UI helpers for switching views
+  function showLeaderboard() {
+    gameView.classList.remove('active');
+    leaderboardView.classList.add('active');
+    gameOverScreen.classList.remove('active');
+    renderLeaderboard();
+  }
+  function showGameView() {
+    leaderboardView.classList.remove('active');
+    gameView.classList.add('active');
+    gameOverScreen.classList.remove('active');
+    gameView.focus();
+  }
+
+  // Event listeners
+  startGameBtn.addEventListener('click', () => {
+    resetGame();
+    showGameView();
+    gameActive = true;
+    lastMoveTime = 0;
+    if(gameInterval) clearInterval(gameInterval);
+    gameInterval = setInterval(gameLoop, 30);
+  });
+
+  endGameBtn.addEventListener('click', () => {
+    gameOver();
+  });
+
+  submitScoreBtn.addEventListener('click', () => {
+    let name = userNameInput.value.trim();
+    if(!name) {
+      alert('Please enter your name');
+      userNameInput.focus();
+      return;
+    }
+    saveScore(name, score);
+    showLeaderboard();
+  });
+
+  userNameInput.addEventListener('keydown', (e) => {
+    if(e.key === 'Enter') {
+      submitScoreBtn.click();
+    }
+  });
+
+  // Keyboard controls
+  window.addEventListener('keydown', onKeyDown);
+
+  // Initial load
+  renderLeaderboard();
+  showLeaderboard();
+
+  // Accessibility: keep focus on game-view div during game to capture keys
+  gameView.setAttribute('tabindex', '0');
+
+})();
+</script>
+</body>
+</html>
+
